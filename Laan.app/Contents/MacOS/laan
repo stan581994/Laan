@@ -1,0 +1,80 @@
+#!/bin/bash
+# Laan launcher — starts hosts_agent + Docker container, then opens the browser.
+
+# Resolve project root (3 levels up from MacOS/ inside Laan.app)
+SCRIPT="$(cd "$(dirname "$0")" && pwd)"
+APP_BUNDLE="$(dirname "$(dirname "$SCRIPT")")"
+PROJECT_DIR="$(dirname "$APP_BUNDLE")"
+
+FRONTEND_URL="http://localhost:5000"
+BACKEND_URL="http://localhost:7070"
+HOSTS_AGENT="$PROJECT_DIR/hosts_agent.py"
+
+# ─── 1. Find uv (macOS .app bundles get a minimal PATH) ────────────────────
+_find_uv() {
+  # Probe in order: PATH, Homebrew (Apple Silicon + Intel), cargo, local
+  for candidate in \
+    "$(command -v uv 2>/dev/null)" \
+    "/opt/homebrew/bin/uv" \
+    "/usr/local/bin/uv" \
+    "$HOME/.cargo/bin/uv" \
+    "$HOME/.local/bin/uv"; do
+    [ -x "$candidate" ] && echo "$candidate" && return 0
+  done
+  return 1
+}
+UV="$(_find_uv)"
+
+# ─── 2. Start hosts_agent if not already running ───────────────────────────
+if ! pgrep -f "hosts_agent.py" > /dev/null 2>&1; then
+  if [ -n "$UV" ]; then
+    "$UV" run "$HOSTS_AGENT" > /tmp/laan-hosts-agent.log 2>&1 &
+  else
+    osascript -e 'display alert "Laan: uv not found" message "Install uv via Homebrew:\n  brew install uv\n\nThe app will continue but site blocking is disabled." as warning'
+  fi
+fi
+
+# ─── 3. Start Docker container if not running ──────────────────────────────
+if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^laan$"; then
+  # Check if Docker is running
+  if ! docker info > /dev/null 2>&1; then
+    open -a Docker
+    # Wait up to 30s for Docker to start
+    for i in $(seq 1 30); do
+      docker info > /dev/null 2>&1 && break
+      sleep 1
+    done
+  fi
+
+  # Check if the image exists; if not, build it
+  if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^laan:latest$"; then
+    osascript -e 'display notification "Building Laan for the first time… (this takes ~2 min)" with title "Laan"'
+    cd "$PROJECT_DIR" && docker build -t laan . > /tmp/laan-build.log 2>&1
+    if [ $? -ne 0 ]; then
+      osascript -e 'display alert "Laan build failed" message "Check /tmp/laan-build.log for details." as critical'
+      exit 1
+    fi
+  fi
+
+  # Remove any stopped container with the same name
+  docker rm laan > /dev/null 2>&1 || true
+
+  docker run -d \
+    --name laan \
+    -p 5000:5000 \
+    -p 7070:7070 \
+    -v laan-data:/data \
+    --add-host=host.docker.internal:host-gateway \
+    laan:latest > /dev/null 2>&1
+fi
+
+# ─── 4. Wait for backend to be ready (up to 30s) ───────────────────────────
+for i in $(seq 1 30); do
+  if curl -sf "$BACKEND_URL/health" > /dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+# ─── 5. Open in default browser ────────────────────────────────────────────
+open "$FRONTEND_URL"
