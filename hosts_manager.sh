@@ -19,7 +19,6 @@ case "$1" in
     killall -HUP mDNSResponder 2>/dev/null || true
     ;;
   restore)
-    # Remove only laan-block tagged lines
     sed -i '' "/$TAG$/d" "$HOSTS"
     dscacheutil -flushcache
     killall -HUP mDNSResponder 2>/dev/null || true

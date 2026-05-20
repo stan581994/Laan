@@ -1,3 +1,13 @@
+export const ACHIEVEMENTS_META: Record<string, { name: string; description: string; icon: string }> = {
+  first_laan:  { name: 'First Laan',        description: 'Complete your first session',           icon: '🌱' },
+  dedicated:   { name: 'Dedicated',          description: '7-day streak',                          icon: '🔥' },
+  disciplined: { name: 'Disciplined',        description: '30-day streak',                         icon: '⚡' },
+  century:     { name: 'Century',            description: '100 sessions total',                    icon: '💯' },
+  deep_work:   { name: 'Deep Work',          description: 'Complete a session of 3+ hours',        icon: '🌊' },
+  clean_week:  { name: 'Clean Week',         description: '5 sessions in one week',                icon: '📅' },
+  no_breaks:   { name: 'No Breaks Needed',   description: 'Complete a 2h+ session with 0 breaks',  icon: '🧘' },
+}
+
 export interface Site {
   id: number
   domain: string
@@ -13,7 +23,7 @@ export interface Session {
   actual_duration_minutes: number | null
   breaks_budget: number
   breaks_used: number
-  status: 'active' | 'completed' | 'abandoned'
+  status: 'active' | 'completed' | 'failed' | 'abandoned'
   started_at: string
   completed_at: string | null
 }

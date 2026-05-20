@@ -1,0 +1,11 @@
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/laan.db
+frontend/node_modules/
+frontend/dist/
+Laan.app/
+scripts/
+.git/
+.gitignore
+*.md

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ACHIEVEMENTS_META } from '../api/client'
 import { useSession } from '../hooks/useSession'
 import { useTimer } from '../hooks/useTimer'
 
@@ -11,7 +12,7 @@ function calcBreaksBudget(totalMinutes: number): number {
 // ─────────────────────────── Idle / start form ───────────────────────────────
 
 interface StartFormProps {
-  onStart: (taskName: string, description: string, hours: number, minutes: number) => void
+  onStart: (taskName: string, description: string, hours: number, minutes: number, seconds: number) => void
   error: string | null
 }
 
@@ -20,14 +21,16 @@ function StartForm({ onStart, error }: StartFormProps) {
   const [description, setDescription] = useState('')
   const [hours, setHours] = useState(0)
   const [minutes, setMinutes] = useState(25)
+  const [seconds, setSeconds] = useState(0)
 
-  const totalMinutes = hours * 60 + minutes
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds
+  const totalMinutes = totalSeconds / 60
   const breaksBudget = totalMinutes > 0 ? calcBreaksBudget(totalMinutes) : 0
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!taskName.trim() || totalMinutes < 1) return
-    onStart(taskName.trim(), description.trim(), hours, minutes)
+    if (!taskName.trim() || totalSeconds < 10) return
+    onStart(taskName.trim(), description.trim(), hours, minutes, seconds)
   }
 
   return (
@@ -114,10 +117,26 @@ function StartForm({ onStart, error }: StartFormProps) {
               />
               <span style={{ color: '#A08060' }}>min</span>
             </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={59}
+                value={seconds}
+                onChange={(e) => setSeconds(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-20 px-3 py-2 rounded text-center text-lg outline-none border focus:border-[#D4A017] transition-colors"
+                style={{
+                  background: '#1a1008',
+                  border: '1px solid #3d2515',
+                  color: '#F5E6CC',
+                }}
+              />
+              <span style={{ color: '#A08060' }}>sec</span>
+            </div>
           </div>
         </div>
 
-        {totalMinutes > 0 && (
+        {totalSeconds > 0 && (
           <p className="text-sm" style={{ color: '#A08060' }}>
             You'll have{' '}
             <span style={{ color: '#D4A017' }}>{breaksBudget}</span>{' '}
@@ -127,7 +146,7 @@ function StartForm({ onStart, error }: StartFormProps) {
 
         <button
           type="submit"
-          disabled={!taskName.trim() || totalMinutes < 1}
+          disabled={!taskName.trim() || totalSeconds < 10}
           className="w-full py-4 rounded-lg text-lg font-semibold transition-opacity disabled:opacity-40"
           style={{ background: '#D4A017', color: '#0f0a05' }}
         >
@@ -162,13 +181,15 @@ interface ActiveViewProps {
   session: import('../api/client').Session
   formatted: { hours: string; minutes: string; seconds: string }
   timedOut: boolean
+  isAlarmPlaying: boolean
   onTakeBreak: () => void
   onEnd: () => void
   onAbandon: () => void
+  onStopAlarm: () => void
   error: string | null
 }
 
-function ActiveView({ session, formatted, timedOut, onTakeBreak, onEnd, onAbandon, error }: ActiveViewProps) {
+function ActiveView({ session, formatted, timedOut, isAlarmPlaying, onTakeBreak, onEnd, onAbandon, onStopAlarm, error }: ActiveViewProps) {
   const [abandonConfirm, setAbandonConfirm] = useState(false)
   const confirmTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -243,6 +264,17 @@ function ActiveView({ session, formatted, timedOut, onTakeBreak, onEnd, onAbando
           </p>
         </div>
 
+        {/* Silence alarm */}
+        {isAlarmPlaying && (
+          <button
+            onClick={onStopAlarm}
+            className="w-full py-3 rounded-lg font-semibold animate-pulse"
+            style={{ background: '#8B3030', color: '#F5E6CC' }}
+          >
+            🔔 Silence Alarm
+          </button>
+        )}
+
         {/* Action buttons */}
         <div className="flex flex-col w-full gap-3">
           <button
@@ -283,9 +315,11 @@ function ActiveView({ session, formatted, timedOut, onTakeBreak, onEnd, onAbando
 
 interface BreakViewProps {
   formatted: { hours: string; minutes: string; seconds: string }
+  isAlarmPlaying: boolean
+  onStopAlarm: () => void
 }
 
-function BreakView({ formatted }: BreakViewProps) {
+function BreakView({ formatted, isAlarmPlaying, onStopAlarm }: BreakViewProps) {
   return (
     <div className="flex items-center justify-center min-h-full px-8 py-12">
       <div className="flex flex-col items-center gap-6">
@@ -304,6 +338,15 @@ function BreakView({ formatted }: BreakViewProps) {
         <p className="text-xs" style={{ color: '#A08060' }}>
           Get back to focus when it hits zero
         </p>
+        {isAlarmPlaying && (
+          <button
+            onClick={onStopAlarm}
+            className="px-6 py-3 rounded-lg font-semibold animate-pulse"
+            style={{ background: '#8B3030', color: '#F5E6CC' }}
+          >
+            🔔 Silence Alarm
+          </button>
+        )}
       </div>
     </div>
   )
@@ -317,43 +360,62 @@ interface CompletedViewProps {
   onNewSession: () => void
 }
 
+function formatDuration(totalMinutes: number): string {
+  if (totalMinutes < 1) return '< 1m'
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  if (h > 0 && m > 0) return `${h}h ${m}m`
+  if (h > 0) return `${h}h`
+  return `${m}m`
+}
+
 function CompletedView({ session, newlyUnlocked, onNewSession }: CompletedViewProps) {
   const actualMinutes = session.actual_duration_minutes ?? session.planned_duration_minutes
-  const hours = Math.floor(actualMinutes / 60)
-  const mins = actualMinutes % 60
+  const failed = session.status === 'failed'
 
   return (
     <div className="flex items-center justify-center min-h-full px-8 py-12">
       <div className="w-full max-w-lg flex flex-col items-center gap-6">
-        <div className="text-5xl">✅</div>
-        <h2 className="text-3xl font-semibold text-center" style={{ color: '#F5E6CC' }}>
-          Session Complete!
+        <div className="text-5xl">{failed ? '❌' : '✅'}</div>
+        <h2 className="text-3xl font-semibold text-center" style={{ color: failed ? '#8B3030' : '#F5E6CC' }}>
+          {failed ? 'Session Failed' : 'Session Complete!'}
         </h2>
+        {failed && (
+          <p className="text-sm text-center px-4 py-2 rounded-lg" style={{ background: '#2a0a0a', color: '#A08060' }}>
+            You ended early — {formatDuration(actualMinutes)} of {formatDuration(session.planned_duration_minutes)} planned
+          </p>
+        )}
         <p className="text-lg" style={{ color: '#A08060' }}>
           {session.task_name}
         </p>
+        {!failed && (
         <p className="text-sm" style={{ color: '#A08060' }}>
           Duration:{' '}
-          <span style={{ color: '#F5E6CC' }}>
-            {hours > 0 ? `${hours}h ` : ''}{mins}m
-          </span>
+          <span style={{ color: '#F5E6CC' }}>{formatDuration(actualMinutes)}</span>
         </p>
+        )}
 
         {newlyUnlocked.length > 0 && (
           <div className="w-full flex flex-col gap-3">
             <p className="text-sm font-medium text-center" style={{ color: '#D4A017' }}>
               Achievements Unlocked!
             </p>
-            {newlyUnlocked.map((key) => (
-              <div
-                key={key}
-                className="flex items-center gap-3 px-4 py-3 rounded-lg"
-                style={{ background: '#1a1008', border: '1px solid #D4A017' }}
-              >
-                <span className="text-2xl">🏆</span>
-                <span style={{ color: '#F5E6CC' }}>{key}</span>
-              </div>
-            ))}
+            {newlyUnlocked.map((key) => {
+              const meta = ACHIEVEMENTS_META[key] ?? { name: key, description: '', icon: '🏆' }
+              return (
+                <div
+                  key={key}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg"
+                  style={{ background: '#1a1008', border: '1px solid #D4A017' }}
+                >
+                  <span className="text-2xl">{meta.icon}</span>
+                  <div className="flex flex-col">
+                    <span className="font-medium" style={{ color: '#F5E6CC' }}>{meta.name}</span>
+                    <span className="text-xs" style={{ color: '#A08060' }}>{meta.description}</span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -371,18 +433,24 @@ function CompletedView({ session, newlyUnlocked, onNewSession }: CompletedViewPr
 
 // ─────────────────────────── Main page ───────────────────────────────────────
 
+// Parse a datetime string from the server as UTC (backend returns naive UTC strings)
+function parseUTC(dtStr: string): number {
+  return new Date(dtStr.endsWith('Z') ? dtStr : dtStr + 'Z').getTime()
+}
+
 export default function SessionPage() {
-  const { state, session, newlyUnlocked, error, start, takeBreak, breakEnded, end, abandon, reset } =
+  const { state, session, newlyUnlocked, error, isAlarmPlaying, start, takeBreak, breakEnded, end, abandon, reset, playAlarm, stopAlarm, primeAlarm } =
     useSession()
 
   const [timedOut, setTimedOut] = useState(false)
+  // Store the user's intended total seconds so short sessions (< 1 min) work correctly
+  const plannedTotalSecondsRef = useRef<number>(0)
 
-  const plannedSeconds = session ? session.planned_duration_minutes * 60 : 0
-
-  const mainTimer = useTimer(plannedSeconds, {
+  const mainTimer = useTimer(0, {
     onExpire: useCallback(() => {
       setTimedOut(true)
-    }, []),
+      playAlarm()
+    }, [playAlarm]),
   })
 
   const breakTimer = useTimer(BREAK_DURATION_SECONDS, {
@@ -394,10 +462,13 @@ export default function SessionPage() {
   // When a session becomes active, start the main timer
   useEffect(() => {
     if (state === 'active' && session) {
-      // Calculate remaining time based on server start time
-      const startedAt = new Date(session.started_at).getTime()
+      const startedAt = parseUTC(session.started_at)
       const elapsed = Math.floor((Date.now() - startedAt) / 1000)
-      const remaining = Math.max(0, session.planned_duration_minutes * 60 - elapsed)
+      // Use stored seconds for fresh starts, fall back to planned_duration_minutes for reconnects
+      const planned = plannedTotalSecondsRef.current > 0
+        ? plannedTotalSecondsRef.current
+        : session.planned_duration_minutes * 60
+      const remaining = Math.max(0, planned - elapsed)
       mainTimer.start(remaining)
       setTimedOut(remaining <= 0)
     }
@@ -412,7 +483,7 @@ export default function SessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
 
-  // When returning from break (state goes back to active), resume main timer
+  // When returning from break resume main timer
   useEffect(() => {
     if (state === 'active' && session && mainTimer.timeLeft > 0 && !mainTimer.isRunning) {
       mainTimer.start(mainTimer.timeLeft)
@@ -425,9 +496,13 @@ export default function SessionPage() {
     description: string,
     hours: number,
     minutes: number,
+    seconds: number,
   ) {
-    const totalMinutes = hours * 60 + minutes
-    await start({ task_name: taskName, description: description || undefined, planned_duration_minutes: totalMinutes })
+    primeAlarm() // unlock audio on this user gesture so timer-expiry plays work
+    const totalSeconds = hours * 3600 + minutes * 60 + seconds
+    plannedTotalSecondsRef.current = totalSeconds
+    const plannedMinutes = Math.max(1, Math.ceil(totalSeconds / 60))
+    await start({ task_name: taskName, description: description || undefined, planned_duration_minutes: plannedMinutes })
     setTimedOut(false)
   }
 
@@ -441,6 +516,7 @@ export default function SessionPage() {
     mainTimer.reset()
     breakTimer.pause()
     breakTimer.reset()
+    plannedTotalSecondsRef.current = 0
     setTimedOut(false)
     await abandon()
   }
@@ -453,6 +529,7 @@ export default function SessionPage() {
   function handleReset() {
     mainTimer.reset()
     breakTimer.reset()
+    plannedTotalSecondsRef.current = 0
     setTimedOut(false)
     reset()
   }
@@ -467,16 +544,24 @@ export default function SessionPage() {
         session={session}
         formatted={mainTimer.formatted}
         timedOut={timedOut}
+        isAlarmPlaying={isAlarmPlaying}
         onTakeBreak={handleTakeBreak}
         onEnd={handleEnd}
         onAbandon={handleAbandon}
+        onStopAlarm={stopAlarm}
         error={error}
       />
     )
   }
 
   if (state === 'on_break') {
-    return <BreakView formatted={breakTimer.formatted} />
+    return (
+      <BreakView
+        formatted={breakTimer.formatted}
+        isAlarmPlaying={isAlarmPlaying}
+        onStopAlarm={stopAlarm}
+      />
+    )
   }
 
   if (state === 'completed' && session) {

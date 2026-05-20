@@ -8,12 +8,16 @@ interface UseSessionReturn {
   session: Session | null
   newlyUnlocked: string[]
   error: string | null
+  isAlarmPlaying: boolean
   start: (data: StartSessionData) => Promise<void>
   takeBreak: () => Promise<void>
   breakEnded: () => void
   end: () => Promise<void>
   abandon: () => Promise<void>
   reset: () => void
+  playAlarm: () => void
+  stopAlarm: () => void
+  primeAlarm: () => void
 }
 
 export function useSession(): UseSessionReturn {
@@ -21,19 +25,42 @@ export function useSession(): UseSessionReturn {
   const [session, setSession] = useState<Session | null>(null)
   const [newlyUnlocked, setNewlyUnlocked] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [isAlarmPlaying, setIsAlarmPlaying] = useState(false)
 
   const alarmRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
-    alarmRef.current = new Audio('/alarm.mp3')
+    const audio = new Audio('/alarm.mp3')
+    audio.addEventListener('ended', () => setIsAlarmPlaying(false))
+    alarmRef.current = audio
+    return () => audio.removeEventListener('ended', () => setIsAlarmPlaying(false))
   }, [])
 
   const playAlarm = useCallback(() => {
     if (alarmRef.current) {
       alarmRef.current.currentTime = 0
-      alarmRef.current.play().catch(() => {
-        // Browser may block autoplay — ignore silently
-      })
+      alarmRef.current.play().catch(() => {})
+      setIsAlarmPlaying(true)
+    }
+  }, [])
+
+  const stopAlarm = useCallback(() => {
+    if (alarmRef.current) {
+      alarmRef.current.pause()
+      alarmRef.current.currentTime = 0
+    }
+    setIsAlarmPlaying(false)
+  }, [])
+
+  // Call this on the Start button click to unlock audio for later programmatic plays
+  const primeAlarm = useCallback(() => {
+    if (alarmRef.current) {
+      alarmRef.current.play()
+        .then(() => {
+          alarmRef.current!.pause()
+          alarmRef.current!.currentTime = 0
+        })
+        .catch(() => {})
     }
   }, [])
 
@@ -113,5 +140,5 @@ export function useSession(): UseSessionReturn {
     setError(null)
   }, [])
 
-  return { state, session, newlyUnlocked, error, start, takeBreak, breakEnded, end, abandon, reset }
+  return { state, session, newlyUnlocked, error, isAlarmPlaying, start, takeBreak, breakEnded, end, abandon, reset, playAlarm, stopAlarm, primeAlarm }
 }

@@ -111,15 +111,16 @@ def end_session(session_id: int, db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    session.status = "completed"
+    elapsed = _elapsed_minutes(session.started_at)
+    session.actual_duration_minutes = elapsed
     session.completed_at = datetime.now(timezone.utc)
-    session.actual_duration_minutes = _elapsed_minutes(session.started_at)
+    session.status = "completed" if elapsed >= session.planned_duration_minutes else "failed"
     db.commit()
     db.refresh(session)
 
     _call_agent("restore", [])
 
-    newly_unlocked = check_and_unlock(db)
+    newly_unlocked = check_and_unlock(db) if session.status == "completed" else []
 
     return {"session": session, "newly_unlocked": newly_unlocked}
 

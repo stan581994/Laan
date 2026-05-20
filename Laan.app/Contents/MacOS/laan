@@ -6,13 +6,15 @@ SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 APP_BUNDLE="$(dirname "$(dirname "$SCRIPT")")"
 PROJECT_DIR="$(dirname "$APP_BUNDLE")"
 
-FRONTEND_URL="http://localhost:5000"
+FRONTEND_URL="http://localhost:5050"
 BACKEND_URL="http://localhost:7070"
 HOSTS_AGENT="$PROJECT_DIR/hosts_agent.py"
 
-# ─── 1. Find uv (macOS .app bundles get a minimal PATH) ────────────────────
+# ─── 0. Inject full PATH (macOS .app bundles get a minimal PATH) ───────────
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+# ─── 1. Find uv ────────────────────────────────────────────────────────────
 _find_uv() {
-  # Probe in order: PATH, Homebrew (Apple Silicon + Intel), cargo, local
   for candidate in \
     "$(command -v uv 2>/dev/null)" \
     "/opt/homebrew/bin/uv" \
@@ -61,7 +63,7 @@ if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^laan$"; then
 
   docker run -d \
     --name laan \
-    -p 5000:5000 \
+    -p 5050:5050 \
     -p 7070:7070 \
     -v laan-data:/data \
     --add-host=host.docker.internal:host-gateway \

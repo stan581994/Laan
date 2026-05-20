@@ -3,7 +3,7 @@ services:
     image: laan:latest
     container_name: laan
     ports:
-      - "5000:5000"
+      - "5050:5050"
       - "7070:7070"
     volumes:
       - laan-data:/data

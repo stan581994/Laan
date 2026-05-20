@@ -199,8 +199,10 @@ function SessionRow({ session }: { session: Session }) {
       <td className="py-3 text-sm">
         {session.status === 'completed' ? (
           <span style={{ color: '#D4A017' }}>✅ Completed</span>
+        ) : session.status === 'failed' ? (
+          <span style={{ color: '#8B3030' }}>❌ Failed</span>
         ) : (
-          <span style={{ color: '#8B3030' }}>❌ Abandoned</span>
+          <span style={{ color: '#A08060' }}>— Abandoned</span>
         )}
       </td>
     </tr>
